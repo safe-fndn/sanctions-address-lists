@@ -137,4 +137,6 @@ jobs:
           trap 'gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes || true' ERR
           gh release upload "$tag" "${FILES[@]}" --repo "$GITHUB_REPOSITORY"
           trap - ERR
+          # Publishing makes the release immutable: from here on its assets
+          # and tag can never be changed, and the tag name can't be reused.
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
