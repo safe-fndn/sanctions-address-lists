@@ -170,51 +170,56 @@ output for that source is never overwritten with an empty or partial one.
 
 ## Stable download URLs
 
-The daily workflow publishes `dist/**` as assets on a GitHub Release tagged
-`latest` (assets are overwritten in place, not accumulated per day), giving
-stable per-file URLs:
+The repo uses [immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases):
+once published, a release's assets and tag can't be changed. So instead of
+overwriting one release in place, the daily workflow publishes `dist/**` as a
+new release tagged `data-YYYY-MM-DD` (UTC) whenever the lists change, and
+marks it as GitHub's "Latest" release. That gives stable per-file URLs that
+always resolve to the newest data:
 
 ```
-https://github.com/safe-research/sanctions-address-lists/releases/download/latest/us-ofac.csv
-https://github.com/safe-research/sanctions-address-lists/releases/download/latest/us-ofac.json
+https://github.com/safe-research/sanctions-address-lists/releases/latest/download/us-ofac.csv
+https://github.com/safe-research/sanctions-address-lists/releases/latest/download/us-ofac.json
 ...
-https://github.com/safe-research/sanctions-address-lists/releases/download/latest/manifest.json
+https://github.com/safe-research/sanctions-address-lists/releases/latest/download/manifest.json
 ```
+
+Note the path order: `/releases/latest/download/…` (the release marked
+"Latest"), not `/releases/download/latest/…` (a tag literally named `latest`,
+which is no longer published).
 
 Generated datasets are published as release assets rather than committed to
-git history, since there's no concrete auditability need here that would
-outweigh the simplicity of a single stable tag.
+git history; since each release is immutable, past releases double as a
+version history.
 
-The daily job only *updates* the `latest` release's CSV/JSON/TXT assets when
-they actually differ from what's already published — it downloads the
-current release assets first and byte-compares them against the freshly
-generated ones, skipping the update entirely on a day with no address
-changes. `manifest.json` is handled separately and is always refreshed
-(even on a no-change day) so its `retrieved_at`/status/counts stay current;
-it's excluded from the change comparison since it always contains volatile,
-per-run fields.
+The daily job only publishes a new release when the CSV/JSON/TXT files
+actually differ from the current "Latest" release — it downloads that
+release's assets first and byte-compares them against the freshly generated
+ones, skipping publishing entirely on a day with no address changes.
+`manifest.json` is excluded from that comparison since it always contains
+volatile, per-run fields; it describes the run that published its release, so
+on a no-change day it is not refreshed. Whether the daily job ran (and which
+sources failed) is visible in the repository's Actions tab.
 
 ### Historical snapshots
 
-Because `latest`'s assets are overwritten in place, it alone has no history —
-fetching `us-ofac.csv` today tells you nothing about what it looked like last
-month. On any day the lists actually change, the same files are *also*
-published to a dated release tagged `data-YYYY-MM-DD` (UTC), giving a
-permanent, individually fetchable snapshot:
+Every release stays fetchable by its tag, giving a permanent snapshot of the
+lists as of that day:
 
 ```
 https://github.com/safe-research/sanctions-address-lists/releases/download/data-2026-08-24/us-ofac.csv
 ```
 
-No snapshot is created on a day with no changes — that would just duplicate
-the previous one. Each snapshot's release notes list which sources changed
-since the prior snapshot.
+If the lists change more than once on the same UTC day (e.g. a manual re-run),
+the later release gets a time-suffixed tag such as `data-2026-08-24T153012Z`,
+since published tag names can't be reused. Each release's notes list which
+sources changed since the prior release.
 
 ## Update cadence
 
 - **`publish.yml`** (main branch) runs on a daily schedule and can also be
-  triggered manually via `workflow_dispatch`. It's the one that updates the
-  stable `latest` release described above.
+  triggered manually via `workflow_dispatch`. It's the one that publishes a
+  new release when the lists change, as described above.
 - **`pr-preview.yml`** runs on every pull request: it fetches and parses all
   sources against live data, uploads the full `dist/` output (CSV/JSON/TXT +
   manifest) as a downloadable build artifact on the workflow run, and posts
