@@ -14,6 +14,7 @@ import httpx
 from sanctions_address_lists.http import DEFAULT_RETRIES, get_with_retries
 from sanctions_address_lists.models import AddressLink, SourceRecord, SourceResult
 from sanctions_address_lists.sources.errors import EmptyResultError, SchemaError
+from sanctions_address_lists.textscan import BOUNDARY_RE
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,23 @@ class SourceAdapter(ABC):
             return raw, resolved_url, records, links
         raise AssertionError("unreachable")
 
+    def _warn_unextracted(self, raw: bytes, links: list[AddressLink]) -> None:
+        """Warn about EVM addresses anywhere in the raw payload that ``parse()`` didn't extract.
+
+        A safety net for adapters looking in the wrong place. A warning, not a
+        failure: sections like change history can legitimately hold delisted
+        addresses.
+        """
+        in_raw = {m.group(0).lower() for m in BOUNDARY_RE.finditer(raw.decode("utf-8", "replace"))}
+        missing = sorted(in_raw - {link.address for link in links})
+        if missing:
+            logger.warning(
+                "%s: %d address(es) in the raw payload were not extracted: %s",
+                self.SOURCE_ID,
+                len(missing),
+                ", ".join(missing),
+            )
+
     def run(self, client: httpx.Client, *, retries: int = DEFAULT_RETRIES) -> SourceResult:
         """Fetch, hash, and parse this source, producing a `SourceResult`."""
         retrieved_at = datetime.now(UTC).isoformat()
@@ -98,6 +116,7 @@ class SourceAdapter(ABC):
                 error=str(exc),
             )
 
+        self._warn_unextracted(raw, links)
         deduped = sorted(
             {link.dedup_key: link for link in links}.values(),
             key=lambda link: link.sort_key,
