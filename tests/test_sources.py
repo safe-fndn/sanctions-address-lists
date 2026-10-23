@@ -3,6 +3,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from sanctions_address_lists.sources import base
 from sanctions_address_lists.sources.errors import EmptyResultError, SchemaError
 from sanctions_address_lists.sources.eu import EuAdapter
 from sanctions_address_lists.sources.ofac import OfacAdapter
@@ -175,3 +176,40 @@ def test_seco_run_reports_failed_when_fetch_raises(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(adapter, "fetch", _boom)
     result = adapter.run(client=httpx.Client())
     assert result.status == "failed"
+
+
+# --- fetch+parse retry (SourceAdapter.run) -----------------------------------
+
+
+def _fetch_sequence(
+    monkeypatch: pytest.MonkeyPatch, adapter: SecoAdapter, payloads: list[bytes]
+) -> list[int]:
+    """Make ``adapter.fetch`` return ``payloads`` in order; return a call counter."""
+    calls: list[int] = []
+
+    def _fetch(client: httpx.Client, **kw: object) -> tuple[bytes, str]:
+        calls.append(1)
+        return payloads[min(len(calls), len(payloads)) - 1], adapter.SOURCE_URL
+
+    monkeypatch.setattr(adapter, "fetch", _fetch)
+    monkeypatch.setattr(base.time, "sleep", lambda seconds: None)
+    return calls
+
+
+def test_run_refetches_after_truncated_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = SecoAdapter()
+    good = _read("seco_sample.xml")
+    calls = _fetch_sequence(monkeypatch, adapter, [good[: len(good) // 2], good])
+    result = adapter.run(client=httpx.Client())
+    assert result.status == "success"
+    assert result.address_count == 1
+    assert len(calls) == 2
+
+
+def test_run_fails_after_all_parse_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = SecoAdapter()
+    truncated = _read("seco_sample.xml")[:100]
+    calls = _fetch_sequence(monkeypatch, adapter, [truncated])
+    result = adapter.run(client=httpx.Client())
+    assert result.status == "failed"
+    assert len(calls) == base.PARSE_ATTEMPTS
