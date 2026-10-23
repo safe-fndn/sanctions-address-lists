@@ -1,5 +1,11 @@
 # Feasibility report
 
+> **Update (2026-10):** the SECO findings below are wrong. SECO publishes the
+> same 2 Garantex EVM addresses as EU, in each subject's `other-information`
+> (a sibling of `<identity>`, which the original adapter didn't scan), and
+> the list has 8,667 targets, not 24,483 records. The adapter has since been
+> fixed; see `src/sanctions_address_lists/sources/seco.py`.
+
 Findings are based on directly inspecting each source's live machine-readable
 data during development (not documentation alone), except where noted.
 

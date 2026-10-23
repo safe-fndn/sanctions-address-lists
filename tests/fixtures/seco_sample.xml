@@ -1,14 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<sanctions-list xmlns="urn:seco:sanctions">
-  <sanctions-set>
-    <identity id="1">
-      <identification-document type="passport" number="X1234567"/>
-      <address>
-        <remark>Known crypto wallet address: 0x1234567890abcdef1234567890ABCDEF12345678 used for transfers.</remark>
-      </address>
-    </identity>
-    <identity id="2">
-      <other-information>No blockchain details for this entry.</other-information>
-    </identity>
-  </sanctions-set>
-</sanctions-list>
+<!-- Trimmed from the live SECO list's structure; names and addresses are placeholders. -->
+<swiss-sanctions-list list-type="whole-list" date="2026-10-20">
+  <sanctions-program ssid="1"/>
+  <target ssid="100">
+    <sanctions-set-id>10</sanctions-set-id>
+    <entity>
+      <identity ssid="101" main="true">
+        <name ssid="102" name-type="primary-name"><name-part order="1" name-part-type="whole-name"><value>Example Exchange</value></name-part></name>
+        <address ssid="103"><address-details>Example street 1</address-details></address>
+      </identity>
+      <justification ssid="104">Example Exchange is a crypto-currency exchange.</justification>
+      <other-information ssid="105">Type of entity: Crypto-currency exchange</other-information>
+      <other-information ssid="106">Known blockchain wallet addresses: ETH: 0x1234567890ABCDEF1234567890abcdef12345678; BTC: bc1qexampleexampleexampleexampleexample0</other-information>
+    </entity>
+    <modification modification-type="amended" enactment-date="2025-03-18">
+      <removed>
+        <identity ssid="101" main="true"/>
+        <other-information ssid="107">Known blockchain wallet addresses: ETH: 0x9999999999999999999999999999999999999999</other-information>
+      </removed>
+    </modification>
+    <modification modification-type="listed" enactment-date="2025-03-03"/>
+  </target>
+  <target ssid="200">
+    <sanctions-set-id>20</sanctions-set-id>
+    <individual sex="male">
+      <identity ssid="201" main="true">
+        <name ssid="202" name-type="primary-name"><name-part order="1" name-part-type="family-name"><value>Example</value></name-part></name>
+        <identification-document ssid="203" document-type="other">
+          <number>X1234567</number>
+          <remark>Wallet 0xabcdefabcdefabcdefabcdefabcdefabcdefabcd</remark>
+        </identification-document>
+      </identity>
+      <other-information ssid="204">Function: Example</other-information>
+    </individual>
+    <modification modification-type="listed" enactment-date="2024-01-01"/>
+  </target>
+  <target ssid="300">
+    <sanctions-set-id>30</sanctions-set-id>
+    <object object-type="vessel">
+      <identity ssid="301" main="true">
+        <name ssid="302" name-type="primary-name"><name-part order="1" name-part-type="whole-name"><value>Example Vessel</value></name-part></name>
+      </identity>
+      <other-information ssid="303">IMO Number: 1234567</other-information>
+    </object>
+    <modification modification-type="listed" enactment-date="2016-05-18"/>
+  </target>
+</swiss-sanctions-list>
