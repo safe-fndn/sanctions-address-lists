@@ -178,10 +178,10 @@ marks it as GitHub's "Latest" release. That gives stable per-file URLs that
 always resolve to the newest data:
 
 ```
-https://github.com/safe-research/sanctions-address-lists/releases/latest/download/us-ofac.csv
-https://github.com/safe-research/sanctions-address-lists/releases/latest/download/us-ofac.json
+https://github.com/safe-fndn/sanctions-address-lists/releases/latest/download/us-ofac.csv
+https://github.com/safe-fndn/sanctions-address-lists/releases/latest/download/us-ofac.json
 ...
-https://github.com/safe-research/sanctions-address-lists/releases/latest/download/manifest.json
+https://github.com/safe-fndn/sanctions-address-lists/releases/latest/download/manifest.json
 ```
 
 Note the path order: `/releases/latest/download/…` (the release marked
@@ -207,7 +207,7 @@ Every release stays fetchable by its tag, giving a permanent snapshot of the
 lists as of that day:
 
 ```
-https://github.com/safe-research/sanctions-address-lists/releases/download/data-2026-08-24/us-ofac.csv
+https://github.com/safe-fndn/sanctions-address-lists/releases/download/data-2026-08-24/us-ofac.csv
 ```
 
 If the lists change more than once on the same UTC day (e.g. a manual re-run),

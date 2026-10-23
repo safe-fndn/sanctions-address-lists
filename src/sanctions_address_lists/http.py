@@ -20,7 +20,7 @@ DEFAULT_TIMEOUT = 30.0
 DEFAULT_RETRIES = 3
 _RETRY_BACKOFF_SECONDS = 1.0
 _USER_AGENT = (
-    "sanctions-address-lists/0.1 (+https://github.com/safe-research/sanctions-address-lists)"
+    "sanctions-address-lists/0.1 (+https://github.com/safe-fndn/sanctions-address-lists)"
 )
 
 
