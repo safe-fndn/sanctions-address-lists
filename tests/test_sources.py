@@ -1,4 +1,5 @@
 import gzip
+import logging
 from pathlib import Path
 
 import httpx
@@ -21,6 +22,8 @@ def _read(name: str) -> bytes:
 
 
 ETH_ADDRESS = "0x1234567890abcdef1234567890abcdef12345678"
+SECO_REMARK_ADDRESS = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+SECO_REMOVED_ADDRESS = "0x9999999999999999999999999999999999999999"
 
 
 # --- OFAC -------------------------------------------------------------------
@@ -145,16 +148,29 @@ def test_un_wrong_root_raises_schema_error() -> None:
 # --- SECO (live-verified; see FEASIBILITY.md for the connectivity history) --
 
 
-def test_seco_extracts_from_remark_and_other_information() -> None:
+def test_seco_extracts_from_other_information_and_identity_remarks() -> None:
     records, links = SecoAdapter().parse(_read("seco_sample.xml"))
-    assert len(records) == 2
-    addresses = {link.address for link in links}
-    assert addresses == {ETH_ADDRESS}
+    assert [record.record_id for record in records] == ["100", "200", "300"]
+    assert {(link.address, link.source_record_id) for link in links} == {
+        (ETH_ADDRESS, "100"),
+        (SECO_REMARK_ADDRESS, "200"),
+    }
+
+
+def test_seco_ignores_modification_history() -> None:
+    _, links = SecoAdapter().parse(_read("seco_sample.xml"))
+    assert SECO_REMOVED_ADDRESS not in {link.address for link in links}
 
 
 def test_seco_empty_raises_empty_result_error() -> None:
-    xml = b'<?xml version="1.0"?><sanctions-list xmlns="urn:seco:sanctions"/>'
+    xml = b'<?xml version="1.0"?><swiss-sanctions-list list-type="whole-list"/>'
     with pytest.raises(EmptyResultError):
+        SecoAdapter().parse(xml)
+
+
+def test_seco_wrong_root_raises_schema_error() -> None:
+    xml = b'<?xml version="1.0"?><sanctions-list><target ssid="1"/></sanctions-list>'
+    with pytest.raises(SchemaError):
         SecoAdapter().parse(xml)
 
 
@@ -187,7 +203,7 @@ def test_seco_run_reports_success_on_successful_fetch(monkeypatch: pytest.Monkey
     client, _ = _client(monkeypatch, [httpx.Response(200, content=_read("seco_sample.xml"))])
     result = SecoAdapter().run(client=client)
     assert result.status == "success"
-    assert result.address_count == 1
+    assert result.address_count == 2
     assert SecoAdapter.GATES_BUILD is True
 
 
@@ -209,7 +225,7 @@ def test_run_refetches_after_truncated_payload(monkeypatch: pytest.MonkeyPatch) 
     )
     result = SecoAdapter().run(client=client)
     assert result.status == "success"
-    assert result.address_count == 1
+    assert result.address_count == 2
     assert len(calls) == 2
 
 
@@ -253,3 +269,17 @@ def test_run_refetches_after_undecodable_body(monkeypatch: pytest.MonkeyPatch) -
     result = SecoAdapter().run(client=client)
     assert result.status == "success"
     assert len(calls) == 2
+
+
+def test_run_warns_about_addresses_not_extracted(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client, _ = _client(monkeypatch, [httpx.Response(200, content=_read("seco_sample.xml"))])
+    with caplog.at_level(logging.WARNING):
+        result = SecoAdapter().run(client=client)
+    assert result.status == "success"
+    # Only the address in modification history is left out -- by design.
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert SECO_REMOVED_ADDRESS in warnings[0]
+    assert ETH_ADDRESS not in warnings[0]
