@@ -32,15 +32,25 @@ class SourceAdapter(ABC):
     SOURCE_URL: ClassVar[str]
     GATES_BUILD: ClassVar[bool] = True
 
-    def fetch(self, client: httpx.Client, *, retries: int = DEFAULT_RETRIES) -> tuple[bytes, str]:
-        """Download the source's payload.
+    def fetch(
+        self, client: httpx.Client, *, retries: int = DEFAULT_RETRIES
+    ) -> tuple[bytes, str, list[SourceRecord], list[AddressLink]]:
+        """Download and parse the source's payload.
 
-        Returns ``(raw_bytes, final_url)``. Does not validate structure -- that
-        happens in ``parse()``, since Content-Type headers on official endpoints
-        are not reliable enough to gate on.
+        Returns ``(raw_bytes, final_url, records, links)``. Parsing happens inside
+        the HTTP retry loop, so a payload that fails to parse (e.g. a truncated
+        download) is re-fetched. Structure is validated by ``parse()`` rather than
+        by Content-Type, since headers on official endpoints are not reliable
+        enough to gate on.
         """
-        response = get_with_retries(client, self.SOURCE_URL, retries=retries)
-        return response.content, str(response.url)
+        response, (records, links) = get_with_retries(
+            client,
+            self.SOURCE_URL,
+            parse=self.parse,
+            retry_parse_errors=(SchemaError, EmptyResultError),
+            retries=retries,
+        )
+        return response.content, str(response.url), records, links
 
     @abstractmethod
     def parse(self, raw: bytes) -> tuple[list[SourceRecord], list[AddressLink]]:
@@ -55,9 +65,8 @@ class SourceAdapter(ABC):
         """Fetch, hash, and parse this source, producing a `SourceResult`."""
         retrieved_at = datetime.now(UTC).isoformat()
         try:
-            raw, resolved_url = self.fetch(client, retries=retries)
+            raw, resolved_url, records, links = self.fetch(client, retries=retries)
             content_hash = hashlib.sha256(raw).hexdigest()
-            records, links = self.parse(raw)
         except (httpx.HTTPError, SchemaError, EmptyResultError, ValueError) as exc:
             logger.error("%s: failed - %s", self.SOURCE_ID, exc)
             return SourceResult(

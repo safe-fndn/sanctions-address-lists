@@ -232,7 +232,10 @@ sources changed since the prior release.
 ## Failure behavior
 
 - Fetching and parsing use explicit timeouts and bounded retries with linear
-  backoff (`http.py`).
+  backoff (`http.py`). Parsing happens inside that single retry loop, so a
+  payload that fails to parse is re-fetched like a transport error or 5xx (up
+  to three attempts in total): a gzip stream cut short inside an otherwise
+  complete HTTP response decodes without error and only surfaces at parse time.
 - Structural validation happens in each adapter's `parse()` method (expected
   root element, expected record count > 0), not by trusting `Content-Type`
   headers — official endpoints sometimes serve `application/octet-stream`
@@ -243,6 +246,10 @@ sources changed since the prior release.
 - Output files are only written when a source's status is `"success"` — a
   failed, unsupported, or unverified run never touches (and never clobbers)
   a prior good output for that source.
+- If a source fails on a run that publishes a new release, its CSV/JSON/TXT
+  files are carried over unchanged from the previous release, so
+  `/releases/latest/download/<file>` keeps working. The release notes name
+  carried-over sources, and `manifest.json` still records them as `failed`.
 - One source's failure never stops other sources from running; the CLI
   processes every registered source and reports per-source status in
   `manifest.json`, then exits non-zero only if a gating source failed.

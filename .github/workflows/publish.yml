@@ -115,6 +115,24 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
+
+          # Each release is a full snapshot, so a source that failed this run
+          # would otherwise be missing from it (and 404 under
+          # /releases/latest/download/). Carry its files over from the previous
+          # release instead; manifest.json still records it as failed.
+          carried=()
+          for source_id in $(jq -r '.[] | select(.status == "failed") | .source_id' dist/manifest.json); do
+            for ext in csv json txt; do
+              previous="/tmp/previous-release/$source_id.$ext"
+              if [ -f "$previous" ] && [ ! -f "dist/$ext/$source_id.$ext" ]; then
+                mkdir -p "dist/$ext"
+                cp "$previous" "dist/$ext/"
+                carried+=("$source_id")
+              fi
+            done
+          done
+          carried_sources="$(printf '%s\n' "${carried[@]}" | sort -u | paste -sd, -)"
+
           FILES=(dist/csv/*.csv dist/json/*.json dist/txt/*.txt dist/manifest.json)
 
           today="$(date -u +%Y-%m-%d)"
@@ -127,6 +145,9 @@ jobs:
           fi
           title="Sanctions address lists: $today"
           notes="Snapshot of the generated address lists as of $timestamp. Changed sources: ${CHANGED_SOURCES:-(none detected)}. See manifest.json for per-source status, provenance, and counts."
+          if [ -n "$carried_sources" ]; then
+            notes="$notes Carried over unchanged from the previous release (source failed this run): $carried_sources."
+          fi
 
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft \
             --target "$GITHUB_SHA" \

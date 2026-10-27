@@ -16,9 +16,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 30.0
+DEFAULT_TIMEOUT = 60.0
 DEFAULT_RETRIES = 3
-_RETRY_BACKOFF_SECONDS = 1.0
+_RETRY_BACKOFF_SECONDS = 5.0
 _USER_AGENT = "sanctions-address-lists/0.1 (+https://github.com/safe-fndn/sanctions-address-lists)"
 
 
@@ -31,23 +31,32 @@ def build_client(timeout: float = DEFAULT_TIMEOUT) -> httpx.Client:
     )
 
 
-def get_with_retries(
+def get_with_retries[T](
     client: httpx.Client,
     url: str,
     *,
+    parse: Callable[[bytes], T],
+    retry_parse_errors: tuple[type[Exception], ...] = (),
     retries: int = DEFAULT_RETRIES,
     sleep: Callable[[float], None] = time.sleep,
-) -> httpx.Response:
-    """GET ``url``, retrying transport errors and 5xx responses with linear backoff.
+) -> tuple[httpx.Response, T]:
+    """GET and ``parse`` ``url``, retrying transient failures with linear backoff.
 
-    Raises the last encountered exception (or ``httpx.HTTPStatusError``) if all
-    attempts fail. Does not retry 4xx responses -- those are not transient.
+    Retries transport errors, undecodable bodies, 5xx responses, and payloads
+    whose ``parse`` raises one of ``retry_parse_errors``. The last case covers a
+    truncated download that HTTP can't detect: a chunked response terminated
+    cleanly around a gzip stream that was cut short (httpx doesn't check that
+    the gzip stream is complete), which only surfaces as a parse failure.
+
+    Returns ``(response, parsed)``. Raises the last encountered exception (or
+    ``httpx.HTTPStatusError``) if all attempts fail. Does not retry 4xx
+    responses -- those are not transient.
     """
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
             response = client.get(url)
-        except httpx.TransportError as exc:
+        except (httpx.TransportError, httpx.DecodingError) as exc:
             last_exc = exc
             logger.warning("GET %s attempt %d/%d failed: %s", url, attempt, retries, exc)
         else:
@@ -55,15 +64,26 @@ def get_with_retries(
                 response.raise_for_status()
                 if not response.content:
                     raise ValueError(f"GET {url} returned an empty body")
-                return response
-            last_exc = httpx.HTTPStatusError(
-                f"server error {response.status_code}",
-                request=response.request,
-                response=response,
-            )
-            logger.warning(
-                "GET %s attempt %d/%d returned %d", url, attempt, retries, response.status_code
-            )
+                try:
+                    return response, parse(response.content)
+                except retry_parse_errors as exc:
+                    last_exc = exc
+                    logger.warning(
+                        "GET %s attempt %d/%d returned an unparseable payload: %s",
+                        url,
+                        attempt,
+                        retries,
+                        exc,
+                    )
+            else:
+                last_exc = httpx.HTTPStatusError(
+                    f"server error {response.status_code}",
+                    request=response.request,
+                    response=response,
+                )
+                logger.warning(
+                    "GET %s attempt %d/%d returned %d", url, attempt, retries, response.status_code
+                )
         if attempt < retries:
             sleep(_RETRY_BACKOFF_SECONDS * attempt)
     assert last_exc is not None

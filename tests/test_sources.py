@@ -1,8 +1,11 @@
+import gzip
 from pathlib import Path
 
 import httpx
 import pytest
 
+from sanctions_address_lists import http
+from sanctions_address_lists.http import DEFAULT_RETRIES
 from sanctions_address_lists.sources.errors import EmptyResultError, SchemaError
 from sanctions_address_lists.sources.eu import EuAdapter
 from sanctions_address_lists.sources.ofac import OfacAdapter
@@ -155,23 +158,98 @@ def test_seco_empty_raises_empty_result_error() -> None:
         SecoAdapter().parse(xml)
 
 
+def _client(
+    monkeypatch: pytest.MonkeyPatch, responses: list[httpx.Response | Exception]
+) -> tuple[httpx.Client, list[int]]:
+    """A client whose requests yield ``responses`` in order (the last one repeats).
+
+    Returns the client and a request counter. Retry backoff is disabled.
+    """
+    calls: list[int] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        response = responses[min(len(calls), len(responses)) - 1]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(http, "_RETRY_BACKOFF_SECONDS", 0.0)
+    return httpx.Client(transport=httpx.MockTransport(_handler)), calls
+
+
+def _gzip_response(body: bytes) -> httpx.Response:
+    """A gzip-encoded response whose body is only decoded when the client reads it."""
+    return httpx.Response(200, headers={"Content-Encoding": "gzip"}, stream=httpx.ByteStream(body))
+
+
 def test_seco_run_reports_success_on_successful_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    adapter = SecoAdapter()
-    monkeypatch.setattr(
-        adapter, "fetch", lambda client, **kw: (_read("seco_sample.xml"), adapter.SOURCE_URL)
-    )
-    result = adapter.run(client=httpx.Client())
+    client, _ = _client(monkeypatch, [httpx.Response(200, content=_read("seco_sample.xml"))])
+    result = SecoAdapter().run(client=client)
     assert result.status == "success"
     assert result.address_count == 1
     assert SecoAdapter.GATES_BUILD is True
 
 
 def test_seco_run_reports_failed_when_fetch_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    adapter = SecoAdapter()
-
-    def _boom(client: httpx.Client, **kw: object) -> tuple[bytes, str]:
-        raise httpx.ConnectTimeout("simulated timeout")
-
-    monkeypatch.setattr(adapter, "fetch", _boom)
-    result = adapter.run(client=httpx.Client())
+    client, calls = _client(monkeypatch, [httpx.ConnectTimeout("simulated timeout")])
+    result = SecoAdapter().run(client=client)
     assert result.status == "failed"
+    assert len(calls) == DEFAULT_RETRIES
+
+
+# --- parse failures are retried in the HTTP retry loop ------------------------
+
+
+def test_run_refetches_after_truncated_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    good = _read("seco_sample.xml")
+    client, calls = _client(
+        monkeypatch,
+        [httpx.Response(200, content=good[: len(good) // 2]), httpx.Response(200, content=good)],
+    )
+    result = SecoAdapter().run(client=client)
+    assert result.status == "success"
+    assert result.address_count == 1
+    assert len(calls) == 2
+
+
+def test_run_fails_after_all_attempts_return_unparseable_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, calls = _client(
+        monkeypatch, [httpx.Response(200, content=_read("seco_sample.xml")[:100])]
+    )
+    result = SecoAdapter().run(client=client)
+    assert result.status == "failed"
+    assert len(calls) == DEFAULT_RETRIES
+
+
+def test_run_refetches_after_truncated_gzip_in_complete_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A complete HTTP response around a gzip stream that was cut short: httpx
+    # decodes it without error, so only the parse failure reveals it.
+    good = _read("seco_sample.xml")
+    client, calls = _client(
+        monkeypatch,
+        [
+            _gzip_response(gzip.compress(good)[:-200]),
+            _gzip_response(gzip.compress(good)),
+        ],
+    )
+    result = SecoAdapter().run(client=client)
+    assert result.status == "success"
+    assert len(calls) == 2
+
+
+def test_run_refetches_after_undecodable_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, calls = _client(
+        monkeypatch,
+        [
+            _gzip_response(b"not gzip"),
+            httpx.Response(200, content=_read("seco_sample.xml")),
+        ],
+    )
+    result = SecoAdapter().run(client=client)
+    assert result.status == "success"
+    assert len(calls) == 2
