@@ -96,8 +96,8 @@ one-line summary — not raw request/parsing logs:
 ✓ eu           success       6234 records     2 addresses
 ✓ uk           success       6334 records     6 addresses
 ✓ un           success       1011 records     0 addresses
-✓ ch-seco      success      24483 records     0 addresses
-5/5 sources succeeded, 112 total addresses
+✓ ch-seco      success       8667 records     2 addresses
+5/5 sources succeeded, 114 total addresses
 ```
 
 - `-v` / `--verbose` — show detailed diagnostic logs instead (HTTP
