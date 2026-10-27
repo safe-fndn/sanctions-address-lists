@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import time
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from typing import ClassVar
@@ -16,12 +15,6 @@ from sanctions_address_lists.models import AddressLink, SourceRecord, SourceResu
 from sanctions_address_lists.sources.errors import EmptyResultError, SchemaError
 
 logger = logging.getLogger(__name__)
-
-# A truncated download (e.g. a gzip/chunked stream cut short without a
-# transport error) only surfaces as a parse failure, so fetch+parse is retried
-# as a unit.
-PARSE_ATTEMPTS = 3
-_PARSE_RETRY_BACKOFF_SECONDS = 5.0
 
 
 class SourceAdapter(ABC):
@@ -39,15 +32,25 @@ class SourceAdapter(ABC):
     SOURCE_URL: ClassVar[str]
     GATES_BUILD: ClassVar[bool] = True
 
-    def fetch(self, client: httpx.Client, *, retries: int = DEFAULT_RETRIES) -> tuple[bytes, str]:
-        """Download the source's payload.
+    def fetch(
+        self, client: httpx.Client, *, retries: int = DEFAULT_RETRIES
+    ) -> tuple[bytes, str, list[SourceRecord], list[AddressLink]]:
+        """Download and parse the source's payload.
 
-        Returns ``(raw_bytes, final_url)``. Does not validate structure -- that
-        happens in ``parse()``, since Content-Type headers on official endpoints
-        are not reliable enough to gate on.
+        Returns ``(raw_bytes, final_url, records, links)``. Parsing happens inside
+        the HTTP retry loop, so a payload that fails to parse (e.g. a truncated
+        download) is re-fetched. Structure is validated by ``parse()`` rather than
+        by Content-Type, since headers on official endpoints are not reliable
+        enough to gate on.
         """
-        response = get_with_retries(client, self.SOURCE_URL, retries=retries)
-        return response.content, str(response.url)
+        response, (records, links) = get_with_retries(
+            client,
+            self.SOURCE_URL,
+            parse=self.parse,
+            retry_parse_errors=(SchemaError, EmptyResultError),
+            retries=retries,
+        )
+        return response.content, str(response.url), records, links
 
     @abstractmethod
     def parse(self, raw: bytes) -> tuple[list[SourceRecord], list[AddressLink]]:
@@ -58,34 +61,11 @@ class SourceAdapter(ABC):
         yield zero *addresses* -- that is not an error).
         """
 
-    def _fetch_and_parse(
-        self, client: httpx.Client, *, retries: int
-    ) -> tuple[bytes, str, list[SourceRecord], list[AddressLink]]:
-        """Fetch and parse, re-fetching up to ``PARSE_ATTEMPTS`` times on a parse failure."""
-        for attempt in range(1, PARSE_ATTEMPTS + 1):
-            raw, resolved_url = self.fetch(client, retries=retries)
-            try:
-                records, links = self.parse(raw)
-            except (SchemaError, EmptyResultError) as exc:
-                if attempt == PARSE_ATTEMPTS:
-                    raise
-                logger.warning(
-                    "%s: parse attempt %d/%d failed, re-fetching: %s",
-                    self.SOURCE_ID,
-                    attempt,
-                    PARSE_ATTEMPTS,
-                    exc,
-                )
-                time.sleep(_PARSE_RETRY_BACKOFF_SECONDS * attempt)
-                continue
-            return raw, resolved_url, records, links
-        raise AssertionError("unreachable")
-
     def run(self, client: httpx.Client, *, retries: int = DEFAULT_RETRIES) -> SourceResult:
         """Fetch, hash, and parse this source, producing a `SourceResult`."""
         retrieved_at = datetime.now(UTC).isoformat()
         try:
-            raw, resolved_url, records, links = self._fetch_and_parse(client, retries=retries)
+            raw, resolved_url, records, links = self.fetch(client, retries=retries)
             content_hash = hashlib.sha256(raw).hexdigest()
         except (httpx.HTTPError, SchemaError, EmptyResultError, ValueError) as exc:
             logger.error("%s: failed - %s", self.SOURCE_ID, exc)

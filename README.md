@@ -232,9 +232,10 @@ sources changed since the prior release.
 ## Failure behavior
 
 - Fetching and parsing use explicit timeouts and bounded retries with linear
-  backoff (`http.py`). A payload that fails to parse is re-fetched (up to
-  three attempts in total), since a truncated download can look like a
-  successful response and only surface as a parse error.
+  backoff (`http.py`). Parsing happens inside that single retry loop, so a
+  payload that fails to parse is re-fetched like a transport error or 5xx (up
+  to three attempts in total): a gzip stream cut short inside an otherwise
+  complete HTTP response decodes without error and only surfaces at parse time.
 - Structural validation happens in each adapter's `parse()` method (expected
   root element, expected record count > 0), not by trusting `Content-Type`
   headers — official endpoints sometimes serve `application/octet-stream`
