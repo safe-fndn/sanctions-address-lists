@@ -17,7 +17,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60.0
-DEFAULT_RETRIES = 3
+DEFAULT_RETRIES = 5
 _RETRY_BACKOFF_SECONDS = 5.0
 _USER_AGENT = "sanctions-address-lists/0.1 (+https://github.com/safe-fndn/sanctions-address-lists)"
 
@@ -40,13 +40,16 @@ def get_with_retries[T](
     retries: int = DEFAULT_RETRIES,
     sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[httpx.Response, T]:
-    """GET and ``parse`` ``url``, retrying transient failures with linear backoff.
+    """GET and ``parse`` ``url``, retrying transient failures with exponential backoff.
 
     Retries transport errors, undecodable bodies, 5xx responses, and payloads
     whose ``parse`` raises one of ``retry_parse_errors``. The last case covers a
     truncated download that HTTP can't detect: a chunked response terminated
     cleanly around a gzip stream that was cut short (httpx doesn't check that
     the gzip stream is complete), which only surfaces as a parse failure.
+
+    Backoff between attempts is 5s, 15s, 45s, 135s (x3 each time), so with the
+    default 5 attempts an upstream outage of ~3 minutes is ridden out.
 
     Returns ``(response, parsed)``. Raises the last encountered exception (or
     ``httpx.HTTPStatusError``) if all attempts fail. Does not retry 4xx
@@ -85,6 +88,6 @@ def get_with_retries[T](
                     "GET %s attempt %d/%d returned %d", url, attempt, retries, response.status_code
                 )
         if attempt < retries:
-            sleep(_RETRY_BACKOFF_SECONDS * attempt)
+            sleep(_RETRY_BACKOFF_SECONDS * 3 ** (attempt - 1))
     assert last_exc is not None
     raise last_exc

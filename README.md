@@ -231,10 +231,10 @@ sources changed since the prior release.
 
 ## Failure behavior
 
-- Fetching and parsing use explicit timeouts and bounded retries with linear
-  backoff (`http.py`). Parsing happens inside that single retry loop, so a
+- Fetching and parsing use explicit timeouts and bounded retries with exponential
+  backoff (`http.py`: 5 attempts, waiting 5s/15s/45s/135s). Parsing happens inside that single retry loop, so a
   payload that fails to parse is re-fetched like a transport error or 5xx (up
-  to three attempts in total): a gzip stream cut short inside an otherwise
+  to five attempts in total): a gzip stream cut short inside an otherwise
   complete HTTP response decodes without error and only surfaces at parse time.
 - Structural validation happens in each adapter's `parse()` method (expected
   root element, expected record count > 0), not by trusting `Content-Type`

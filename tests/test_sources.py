@@ -214,6 +214,14 @@ def test_seco_run_reports_failed_when_fetch_raises(monkeypatch: pytest.MonkeyPat
     assert len(calls) == DEFAULT_RETRIES
 
 
+def test_retries_back_off_exponentially_on_persistent_5xx() -> None:
+    client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(500)))
+    sleeps: list[float] = []
+    with pytest.raises(httpx.HTTPStatusError):
+        http.get_with_retries(client, "https://example.test", parse=bytes, sleep=sleeps.append)
+    assert sleeps == [5.0, 15.0, 45.0, 135.0]
+
+
 # --- parse failures are retried in the HTTP retry loop ------------------------
 
 
