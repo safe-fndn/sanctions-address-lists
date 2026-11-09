@@ -18,6 +18,18 @@ from sanctions_address_lists.textscan import BOUNDARY_RE
 logger = logging.getLogger(__name__)
 
 
+def _is_transient(exc: Exception) -> bool:
+    """Whether ``exc`` means the upstream was unavailable, not that something needs fixing.
+
+    Network/connection errors, broken response bodies, and 5xx responses are
+    transient. 4xx (e.g. the URL moved) and parse failures (the format changed)
+    are not.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, httpx.TransportError | httpx.DecodingError)
+
+
 class SourceAdapter(ABC):
     """Base class for a single official sanctions source.
 
@@ -94,6 +106,7 @@ class SourceAdapter(ABC):
                 status="failed",
                 retrieved_at=retrieved_at,
                 error=str(exc),
+                transient=_is_transient(exc),
             )
 
         self._warn_unextracted(raw, links)

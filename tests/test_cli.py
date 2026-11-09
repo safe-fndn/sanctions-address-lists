@@ -50,6 +50,16 @@ class _StubFailing(_StubAdapter):
     RESULT_STATUS = "failed"
 
 
+class _StubUnavailable(_StubAdapter):
+    SOURCE_ID = "stub-unavailable"
+    RESULT_STATUS = "failed"
+
+    def run(self, client: httpx.Client, *, retries: int = 3) -> SourceResult:
+        result = super().run(client, retries=retries)
+        result.transient = True
+        return result
+
+
 class _StubUnverified(_StubAdapter):
     SOURCE_ID = "stub-unverified"
     GATES_BUILD = False
@@ -99,6 +109,16 @@ def test_exit_code_one_when_a_gating_source_fails(
     monkeypatch.setattr(cli, "ALL_SOURCES", sources)
     exit_code = cli.main(["run", "--output-dir", str(tmp_path)])
     assert exit_code == 1
+
+
+def test_exit_code_zero_when_a_gating_source_is_only_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "ALL_SOURCES", (_StubAdapter, _StubUnavailable))
+    exit_code = cli.main(["run", "--output-dir", str(tmp_path), "--no-color"])
+    assert exit_code == 0
+    assert "UNAVAILABLE (not failing the run): stub-unavailable" in capsys.readouterr().out
+    assert '"failed"' in (tmp_path / "manifest.json").read_text()
 
 
 def test_source_filter_limits_which_adapters_run(tmp_path: Path, patched_registry: None) -> None:

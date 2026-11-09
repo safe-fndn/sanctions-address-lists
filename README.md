@@ -252,7 +252,12 @@ sources changed since the prior release.
   carried-over sources, and `manifest.json` still records them as `failed`.
 - One source's failure never stops other sources from running; the CLI
   processes every registered source and reports per-source status in
-  `manifest.json`, then exits non-zero only if a gating source failed.
+  `manifest.json`, then exits non-zero only if a gating source failed for a
+  reason that needs fixing (4xx, unparseable payload). A source that was only
+  unavailable upstream (network error or 5xx after all retries) is reported
+  as `UNAVAILABLE` and still recorded as `failed` in `manifest.json`, but
+  doesn't fail the run; the publish workflow carries its previous files
+  forward and raises a warning annotation.
 
 ## Adding a source adapter
 

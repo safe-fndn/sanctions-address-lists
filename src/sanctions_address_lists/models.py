@@ -48,6 +48,9 @@ class SourceResult:
     record_count: int = 0
     links: tuple[AddressLink, ...] = field(default_factory=tuple)
     error: str | None = None
+    # True when the failure was the upstream being unavailable (network error,
+    # 5xx) after all retries, rather than something needing a code fix.
+    transient: bool = False
 
     @property
     def address_count(self) -> int:

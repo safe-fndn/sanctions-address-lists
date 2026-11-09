@@ -222,6 +222,25 @@ def test_retries_back_off_exponentially_on_persistent_5xx() -> None:
     assert sleeps == [5.0, 15.0, 45.0, 135.0]
 
 
+@pytest.mark.parametrize(
+    ("response", "transient"),
+    [
+        (httpx.ConnectTimeout("simulated timeout"), True),
+        (httpx.RemoteProtocolError("incomplete chunked read"), True),
+        (httpx.Response(500), True),
+        (httpx.Response(404), False),
+        (httpx.Response(200, content=b"<not-xml"), False),
+    ],
+)
+def test_failed_run_flags_upstream_unavailability_as_transient(
+    monkeypatch: pytest.MonkeyPatch, response: httpx.Response | Exception, transient: bool
+) -> None:
+    client, _ = _client(monkeypatch, [response])
+    result = SecoAdapter().run(client=client)
+    assert result.status == "failed"
+    assert result.transient is transient
+
+
 # --- parse failures are retried in the HTTP retry loop ------------------------
 
 

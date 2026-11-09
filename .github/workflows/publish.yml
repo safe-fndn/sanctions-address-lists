@@ -9,7 +9,9 @@ name: Publish sanctions address lists
 #     on a no-change day, so manifest.json reflects the run that published it;
 #     daily run health is visible in the Actions run history.
 #   - A source that fails doesn't block the others: whatever succeeded still
-#     gets published, and the job is marked failed for visibility.
+#     gets published. If the source was merely unavailable (network error,
+#     5xx), the job stays green with a warning annotation; any other failure
+#     (4xx, format change) marks the job failed, since it needs a code fix.
 
 on:
   schedule:
@@ -41,6 +43,13 @@ jobs:
       - name: Run all sources and generate outputs
         id: run_sources
         run: sanctions-address-lists run --output-dir dist
+      - name: Flag failed sources
+        # A source that was only unavailable upstream (network error, 5xx after
+        # all retries) doesn't fail the run -- its files are carried forward
+        # below. Surface it as a warning annotation so it stays visible.
+        if: always() && steps.run_sources.outcome != 'cancelled'
+        run: |
+          jq -r '.[] | select(.status == "failed") | "::warning title=Source \(.source_id) failed::\(.error)"' dist/manifest.json
       - name: Validate outputs are not unexpectedly empty
         if: always() && steps.run_sources.outcome != 'cancelled'
         run: |
