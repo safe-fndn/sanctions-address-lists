@@ -52,6 +52,16 @@ def _status_line(result: SourceResult, *, color: bool) -> str:
     return _colorize(line, _STATUS_COLOR.get(result.status, "0"), enabled=color)
 
 
+def _gates_build(adapter_cls: type[SourceAdapter], result: SourceResult) -> bool:
+    """Whether this failed result should fail the run.
+
+    A gating source that was merely unavailable upstream (network error, 5xx
+    after all retries) doesn't fail the run: there's nothing to fix on our side,
+    and the publish workflow carries its previous files forward.
+    """
+    return adapter_cls.GATES_BUILD and not result.transient
+
+
 def _print_summary(
     outcomes: list[tuple[type[SourceAdapter], SourceResult]], *, color: bool
 ) -> None:
@@ -60,12 +70,19 @@ def _print_summary(
     failed_ids = [
         result.source_id
         for adapter_cls, result in outcomes
-        if result.status == "failed" and adapter_cls.GATES_BUILD
+        if result.status == "failed" and _gates_build(adapter_cls, result)
+    ]
+    unavailable_ids = [
+        result.source_id for _, result in outcomes if result.status == "failed" and result.transient
     ]
     summary = f"{succeeded}/{len(outcomes)} sources succeeded, {total_addresses} total addresses"
+    if unavailable_ids:
+        summary += f" -- UNAVAILABLE (not failing the run): {', '.join(unavailable_ids)}"
     if failed_ids:
         summary += f" -- FAILED: {', '.join(failed_ids)}"
         print(_colorize(summary, _STATUS_COLOR["failed"], enabled=color))
+    elif unavailable_ids:
+        print(_colorize(summary, _STATUS_COLOR["unverified"], enabled=color))
     else:
         print(_colorize(summary, _STATUS_COLOR["success"], enabled=color))
 
@@ -104,7 +121,7 @@ def _run_command(args: argparse.Namespace) -> int:
                 line = _status_line(result, color=color)
                 print(f"\033[2K\r{line}" if interactive else line)
 
-            if result.status == "failed" and adapter_cls.GATES_BUILD:
+            if result.status == "failed" and _gates_build(adapter_cls, result):
                 build_failed = True
 
     write_manifest(manifest_entries, out_dir)
