@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TextIO
 
+from sanctions_address_lists.availability import DEFAULT_MAX_UNAVAILABLE_DAYS, AvailabilityState
 from sanctions_address_lists.http import DEFAULT_RETRIES, DEFAULT_TIMEOUT, build_client
 from sanctions_address_lists.models import SourceResult
 from sanctions_address_lists.output import manifest_entry, write_manifest, write_source_outputs
@@ -57,7 +59,8 @@ def _gates_build(adapter_cls: type[SourceAdapter], result: SourceResult) -> bool
 
     A gating source that was merely unavailable upstream (network error, 5xx
     after all retries) doesn't fail the run: there's nothing to fix on our side,
-    and the publish workflow carries its previous files forward.
+    and the publish workflow carries its previous files forward. Once it's been
+    unavailable for too long, ``_run_command`` clears ``transient`` so it does.
     """
     return adapter_cls.GATES_BUILD and not result.transient
 
@@ -106,6 +109,11 @@ def _run_command(args: argparse.Namespace) -> int:
     color = _use_color(sys.stdout, args.no_color)
     interactive = sys.stdout.isatty()
 
+    state_path = Path(args.state_file) if args.state_file else None
+    state = AvailabilityState.load(state_path) if state_path else None
+    max_unavailable = timedelta(days=args.max_unavailable_days)
+    now = datetime.now(UTC)
+
     with build_client(timeout=args.timeout) as client:
         for adapter_cls in adapter_classes:
             adapter = adapter_cls()
@@ -113,6 +121,13 @@ def _run_command(args: argparse.Namespace) -> int:
                 print(f"  fetching {adapter_cls.SOURCE_ID}...", end="\r", flush=True)
 
             result = adapter.run(client, retries=args.retries)
+            unavailable_for = state.record(result, now) if state else None
+            if unavailable_for is not None and unavailable_for > max_unavailable:
+                result.transient = False
+                result.error = (
+                    f"unavailable for {unavailable_for.days} days "
+                    f"(limit {args.max_unavailable_days:g}): {result.error}"
+                )
             generated_files = write_source_outputs(result, out_dir)
             manifest_entries.append(manifest_entry(result, generated_files))
             outcomes.append((adapter_cls, result))
@@ -125,6 +140,8 @@ def _run_command(args: argparse.Namespace) -> int:
                 build_failed = True
 
     write_manifest(manifest_entries, out_dir)
+    if state and state_path:
+        state.save(state_path)
 
     if not args.quiet:
         _print_summary(outcomes, color=color)
@@ -156,6 +173,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--retries", type=int, default=DEFAULT_RETRIES, help="bounded HTTP retries per request"
+    )
+    run_parser.add_argument(
+        "--state-file",
+        help=(
+            "JSON file tracking how long each source has been unavailable, kept "
+            "between runs; enables --max-unavailable-days"
+        ),
+    )
+    run_parser.add_argument(
+        "--max-unavailable-days",
+        type=float,
+        default=DEFAULT_MAX_UNAVAILABLE_DAYS,
+        help=(
+            "fail the run once a gating source has been unavailable upstream for "
+            "longer than this (needs --state-file; default: %(default)g)"
+        ),
     )
     run_parser.add_argument(
         "-v", "--verbose", action="store_true", help="show detailed request and parsing logs"

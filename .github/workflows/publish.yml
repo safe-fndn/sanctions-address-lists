@@ -10,8 +10,9 @@ name: Publish sanctions address lists
 #     daily run health is visible in the Actions run history.
 #   - A source that fails doesn't block the others: whatever succeeded still
 #     gets published. If the source was merely unavailable (network error,
-#     5xx), the job stays green with a warning annotation; any other failure
-#     (4xx, format change) marks the job failed, since it needs a code fix.
+#     5xx), the job stays green with a warning annotation -- unless it's been
+#     unavailable for more than 7 days. Any other failure (4xx, format change)
+#     marks the job failed, since it needs a code fix.
 
 on:
   schedule:
@@ -40,9 +41,26 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install -e . --no-deps
+      - name: Restore source availability state
+        # Tracks since when each source has been unavailable upstream, so a
+        # source that's down for more than --max-unavailable-days (7) fails the
+        # run. Cache entries are immutable, so every run saves a new one and
+        # this restores the most recent. If the cache was evicted, the clock
+        # restarts at the next unavailable run.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .state/availability.json
+          key: source-availability-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: source-availability-
       - name: Run all sources and generate outputs
         id: run_sources
-        run: sanctions-address-lists run --output-dir dist
+        run: sanctions-address-lists run --output-dir dist --state-file .state/availability.json
+      - name: Save source availability state
+        if: always() && steps.run_sources.outcome != 'cancelled'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .state/availability.json
+          key: source-availability-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Flag failed sources
         # A source that was only unavailable upstream (network error, 5xx after
         # all retries) doesn't fail the run -- its files are carried forward

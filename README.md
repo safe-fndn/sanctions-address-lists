@@ -257,7 +257,10 @@ sources changed since the prior release.
   unavailable upstream (network error or 5xx after all retries) is reported
   as `UNAVAILABLE` and still recorded as `failed` in `manifest.json`, but
   doesn't fail the run; the publish workflow carries its previous files
-  forward and raises a warning annotation.
+  forward and raises a warning annotation. With `--state-file`, the CLI
+  remembers since when each source has been unavailable, and fails the run
+  once that exceeds `--max-unavailable-days` (default 7). The publish workflow
+  keeps that file in the Actions cache between runs.
 
 ## Adding a source adapter
 
